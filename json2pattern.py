@@ -118,33 +118,6 @@ def build_pieceid_to_gradeid(size_obj):
             mp[int(pair[0])] = int(pair[1])
     return mp
 
-def render_with_placement(pieces_variant, by_id, size_obj, out_path):
-    # 根据该尺码的 clothPieceInfoMap 找 matrix3D，还原摆放后渲染
-    pid2gid = build_pieceid_to_gradeid(size_obj)
-
-    placed = {}
-    for pid, loops in pieces_variant.items():
-        gid = pid2gid.get(int(pid))
-        if gid is None:
-            # 此片不在该尺码启用，则跳过
-            continue
-        gi = by_id.get(int(gid), {}) or {}
-        Mv = gi.get("matrix3D")
-        if isinstance(Mv, list) and len(Mv) == 16:
-            M = mat4_from_list(Mv)
-            placed[pid] = apply_matrix2D_via_X0Y(M, loops)
-        else:
-            # 无矩阵则原位
-            placed[pid] = loops
-
-    # 平铺渲染（直接把所有已摆放的loops合并）
-    all_loops = []
-    for v in placed.values():
-        all_loops.extend(v)
-
-    from size_to_svg_sym import _render_svg_any
-    _render_svg_any(all_loops, out_path, fill="#0A2A6B", stroke="#0B1A2F", fill_opacity=1.0, stroke_w=1.2)
-
 # --- 解析 GradeGroup & 取2D仿射 ---
 def find_grade_group(all_classes):
     groups = all_classes.get(4153459189, [])  # GradeGroup
