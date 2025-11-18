@@ -84,7 +84,17 @@ def main():
     data = load_json(json_files)
     all_classes, by_id = build_indexes(data)
     grade_group = find_grade_group(all_classes)
+    grade_ids = list(grade_group.get("grades") or [])
     if grade_group is None:
         print("No GradeGroup found.")
         return
-    
+    pieces = all_classes.get(4153459189, []).get("clothPieces", [])  # GradeGroup
+    pieces_ids = [int(p[0]) for p in pieces]
+    for grade_id in grade_ids:
+        grade_obj = by_id.get(grade_id)
+        if grade_obj is None:
+            print(f"Grade {grade_id} not found.")
+            continue
+        size_name = grade_obj.get("_name", f"G{grade_id}")
+        
+        
