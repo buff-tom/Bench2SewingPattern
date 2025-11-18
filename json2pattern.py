@@ -228,6 +228,7 @@ def main():
         if not piece_ids_this:
             piece_ids_this = cloth_piece_ids_global
 
+        piece_ids_this = [6411]
         # 1) 以“grade 节点”驱动生成当前尺码的裁线 / 缝线
         res = build_loops_for_size(by_id, grade_obj, piece_ids_this)
 
