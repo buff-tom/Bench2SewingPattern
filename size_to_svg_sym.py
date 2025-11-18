@@ -154,46 +154,43 @@ def sample_edge_points_grade(edge_obj: Dict[str, Any],
     pA = get_vertex_xy(int(edge_obj.get("verticeA", -1)), by_id, vertex_delta, all_delta_by_pos)
     pB = get_vertex_xy(int(edge_obj.get("verticeB", -1)), by_id, vertex_delta, all_delta_by_pos)
 
-    cc_ids = edge_obj.get("curveControlPts")
-    if isinstance(cc_ids, list) and len(cc_ids) >= 1:
-        pts: Loop = []
-        if pA: pts.append(pA)
-        for cid in cc_ids:
-            cxy = get_ctrl_xy(int(cid), by_id, ctrl_delta, vertex_delta, all_delta_by_pos)
-            if cxy: pts.append(cxy)
-        if pB: pts.append(pB)
-        if len(pts) >= 2:
-            return _dedup_consecutive(pts)
-
+    # cc_ids = edge_obj.get("curveControlPts")
+    # if isinstance(cc_ids, list) and len(cc_ids) >= 1:
+    #     pts: Loop = []
+    #     if pA: pts.append(pA)
+    #     for cid in cc_ids:
+    #         cxy = get_ctrl_xy(int(cid), by_id, ctrl_delta, vertex_delta, all_delta_by_pos)
+    #         if cxy: pts.append(cxy)
+    #     if pB: pts.append(pB)
+    #     if len(pts) >= 2:
+    #         return _dedup_consecutive(pts)
     curve = edge_obj.get("curve") or {}
     cps = curve.get("controlPoints")
-    vertex_delta_by_pos = {key:by_id.get(key).get('position') for key in vertex_delta.keys()}
-    ctrl_delta_by_pos = {key:by_id.get(key).get('position') if by_id.get(key) is not None else [0.0, 0.0, 0.0] for key in ctrl_delta.keys()}
-    if isinstance(cps, list) and len(cps) >= 2:
-        pts = []
-        for p in cps:
-            p_xy = _to_xy(p)
-            if p in vertex_delta_by_pos.values():
-                vid = list(vertex_delta_by_pos.keys())[list(vertex_delta_by_pos.values()).index(p)]
-                dv = vertex_delta.get(vid, None)
-                if dv is None:
-                    # 尝试从 all_delta_by_pos 读取
-                    dv = all_delta_by_pos.get((p_xy[0], p_xy[1]), (0.0, 0.0))
-                p_xy = _add(p_xy, dv)
-            elif p in ctrl_delta_by_pos.values():
-                cid = list(ctrl_delta_by_pos.keys())[list(ctrl_delta_by_pos.values()).index(p)]
-                dv = ctrl_delta.get(cid, None)
-                if dv is None:
-                    # 尝试从 all_delta_by_pos 读取
-                    dv = all_delta_by_pos.get((p_xy[0], p_xy[1]), (0.0, 0.0))
-                p_xy = _add(p_xy, dv)
-            if p_xy: pts.append(p_xy)
-        if len(pts) >= 2:
-            return _dedup_consecutive(pts)
-
-    if pA and pB:
-        return [pA, pB]
-    return []
+    cps_id = edge_obj.get("curveControlPts")
+    pts = []
+    if pA: pts.append(pA)
+    if not cps_id:
+        if pB: pts.append(pB)
+        return pts
+    for i in range(len(cps_id)):
+        p_id = cps_id[i]
+        p = cps[i + 1]
+        p_xy = _to_xy(p)
+        if p_id in vertex_delta:
+            dv = vertex_delta.get(p_id, None)
+            if dv is None:
+                # 尝试从 all_delta_by_pos 读取
+                dv = all_delta_by_pos.get((p_xy[0], p_xy[1]), (0.0, 0.0))
+            p_xy = _add(p_xy, dv)
+        elif p_id in ctrl_delta:
+            dv = ctrl_delta.get(p_id, None)
+            if dv is None:
+                # 尝试从 all_delta_by_pos 读取
+                dv = all_delta_by_pos.get((p_xy[0], p_xy[1]), (0.0, 0.0))
+            p_xy = _add(p_xy, dv)
+        if p_xy: pts.append(p_xy)
+    if pB: pts.append(pB)
+    return pts
 
 def _valid_loop(L: Loop) -> bool:
     return len(L) >= 4 and abs(_poly_area(L)) > 1e-9
@@ -235,34 +232,18 @@ def assemble_seqedge_loop_grade(seqedge_obj: Dict[str, Any],
         return a, b, poly
 
     a0, b0, p0 = edge_poly(eids[0])
-    vertex_list.append(a0)
-    vertex_list.append(b0)
+    vertex_list.append((a0, b0))
     if len(p0) < 2:
         return []
     loop_pts: Loop = p0[:]     # 含起点
 
-    prev_b = b0
     for eid in eids[1:]:
         a, b, poly = edge_poly(eid)
-        vertex_list.append(b)
+        vertex_list.append((a, b))
         if len(poly) < 2:
             continue
-        if a != prev_b:
-            # 反转这条边再接
-            a, b = b, a
-            poly = list(reversed(poly))
         # 去掉重复的连接点
-        if _dist2(loop_pts[-1], poly[0]) <= 1e-12:
-            loop_pts.extend(poly[1:])
-        else:
-            loop_pts.extend(poly)
-        prev_b = b
-
-    # 闭合
-    if len(loop_pts) >= 3:
-        if _dist2(loop_pts[0], loop_pts[-1]) > 1e-12:
-            loop_pts.append(loop_pts[0])
-        loop_pts = _dedup_consecutive(loop_pts)
+        loop_pts.extend(poly)
     return loop_pts,vertex_list
 
 def pattern_to_loops_grade(pattern_obj: Dict[str, Any],
@@ -276,10 +257,13 @@ def pattern_to_loops_grade(pattern_obj: Dict[str, Any],
         return loops
     for sid in (pattern_obj.get("sequentialEdges") or []):
         so = by_id.get(int(sid))
+        if int(so.get("circleType")) != 0:
+            continue
         L, vertex_list = assemble_seqedge_loop_grade(so, by_id, vertex_delta, ctrl_delta, all_delta_by_pos)
-        vertex_list_all.extend(vertex_list)
-        if len(L) >= 4:
-            loops.append(L)
+        vertex_list_all.append(vertex_list)
+        if len(L) < 4:
+            continue
+        loops.append(L)
     return loops, vertex_list_all
 
 # ---- seam meta ----
@@ -354,13 +338,14 @@ def build_loops_for_size(by_id, size_obj, piece_ids=None, seam_join: str = "roun
 
         cut_loops, vertex_list_all = pattern_to_loops_grade(patt, by_id, vmap, cmap, all_delta_by_pos)
         
+        # print (f"{vertex_list_all}")
         # print ("  Cut loops:", len(cut_loops))
         # print (cut_loops[0])
         # print (cut_loops[1])
         # print (vertex_list_all)
         if not cut_loops:
             continue
-        first_cut_loops = [cut_loops[0]]
+        first_cut_loops = cut_loops[:-1]
         
         # 从数据里读“主流缝份宽”（中位数），不再猜测
         w = piece_uniform_seam_width(piece, by_id)
@@ -377,7 +362,7 @@ def build_loops_for_size(by_id, size_obj, piece_ids=None, seam_join: str = "roun
         # 只要外侧缝份环带（可选）
         seam_band = difference(seam_outer, cut_loops)        
         out[int(pid)] = {
-            "cut": cut_loops,
+            "cut": first_cut_loops,
             "with_seam": seam_outer,
             "seam_band": seam_band,
             "seamline_in": seamline_in
