@@ -41,6 +41,55 @@ def vertex_corner_dist(vid: int, by_id: dict) -> float:
 # ===== 新增：几何小工具（方向、三角楔形、多边形布尔） =====
 import math
 
+# -------------------- 贝塞尔曲线数学公式 --------------------
+def _bezier_quadratic(p0: XY, p1: XY, p2: XY, t: float) -> XY:
+    """二次贝塞尔 B(t) = (1-t)^2 * P0 + 2(1-t)t * P1 + t^2 * P2"""
+    u = 1 - t
+    tt = t * t
+    uu = u * u
+    x = uu * p0[0] + 2 * u * t * p1[0] + tt * p2[0]
+    y = uu * p0[1] + 2 * u * t * p1[1] + tt * p2[1]
+    return (x, y)
+
+def _bezier_cubic(p0: XY, p1: XY, p2: XY, p3: XY, t: float) -> XY:
+    """三次贝塞尔 B(t) = (1-t)^3 P0 + 3(1-t)^2 t P1 + 3(1-t)t^2 P2 + t^3 P3"""
+    u = 1 - t
+    uu = u * u
+    uuu = uu * u
+    tt = t * t
+    ttt = tt * t
+    
+    x = uuu * p0[0] + 3 * uu * t * p1[0] + 3 * u * tt * p2[0] + ttt * p3[0]
+    y = uuu * p0[1] + 3 * uu * t * p1[1] + 3 * u * tt * p2[1] + ttt * p3[1]
+    return (x, y)
+
+def _sample_bezier(points: List[XY], segments: int = 20) -> List[XY]:
+    """将控制点列表离散化为曲线点序列"""
+    if len(points) < 3:
+        return points # 直线或点，无需采样
+    
+    curve_pts = []
+    # 二次贝塞尔 (起点, 控制点, 终点)
+    if len(points) == 3:
+        p0, p1, p2 = points
+        # 从 t=0 到 t=1 采样，这里取中间点，起点终点由外部逻辑处理防止重复
+        for i in range(1, segments): 
+            t = i / float(segments)
+            curve_pts.append(_bezier_quadratic(p0, p1, p2, t))
+            
+    # 三次贝塞尔 (起点, 控制点1, 控制点2, 终点)
+    elif len(points) == 4:
+        p0, p1, p2, p3 = points
+        for i in range(1, segments):
+            t = i / float(segments)
+            curve_pts.append(_bezier_cubic(p0, p1, p2, p3, t))
+            
+    # 其他情况暂按原样返回（或者处理更高阶）
+    else:
+        return points[1:-1] 
+
+    return curve_pts
+
 def _poly_area(pts):
     a = 0.0
     for (x1,y1),(x2,y2) in zip(pts, pts[1:]+pts[:1]):
@@ -132,6 +181,7 @@ def get_ctrl_xy(cid: int, by_id: Dict[int, Dict[str, Any]], ctrl_delta: Dict[int
 
 
 # -------------------- 采样边（保持和原版一致） --------------------
+# -------------------- 采样边（修改版：支持贝塞尔曲线） --------------------
 def sample_edge_points_grade(edge_obj: Dict[str, Any],
                              by_id: Dict[int, Dict[str, Any]],
                              vertex_delta: Dict[int, XY],
@@ -140,36 +190,68 @@ def sample_edge_points_grade(edge_obj: Dict[str, Any],
     if not isinstance(edge_obj, dict):
         return []
 
+    # 1. 获取起点和终点 (应用 Grade 增量)
     pA = get_vertex_xy(int(edge_obj.get("verticeA", -1)), by_id, vertex_delta, all_delta_by_pos)
     pB = get_vertex_xy(int(edge_obj.get("verticeB", -1)), by_id, vertex_delta, all_delta_by_pos)
 
+    # 2. 收集所有控制点 (中间点)
     curve = edge_obj.get("curve") or {}
     cps = curve.get("controlPoints")
     cps_id = edge_obj.get("curveControlPts")
-    pts = []
-    if pA: pts.append(pA)
-    if not cps_id:
-        if pB: pts.append(pB)
-        return pts
-    for i in range(len(cps_id)):
-        p_id = cps_id[i]
-        p = cps[i + 1]
-        p_xy = _to_xy(p)
-        if p_id in vertex_delta:
-            dv = vertex_delta.get(p_id, None)
-            if dv is None:
-                # 尝试从 all_delta_by_pos 读取
+    
+    control_points_xy = [] # 仅存储中间的控制点坐标
+    
+    if cps_id:
+        for i in range(len(cps_id)):
+            p_id = cps_id[i]
+            # Style3D 的 controlPoints 列表通常索引从 1 开始或是列表
+            # 无论如何，我们要找到对应的基础坐标
+            # 注意：cps 可能是 list 也可能是 dict，视解析结果而定
+            # 这里沿用你之前的逻辑尝试获取 p
+            try:
+                p = cps[i + 1] if isinstance(cps, list) else cps.get(str(i+1)) # 容错
+            except:
+                p = None
+            
+            p_xy = _to_xy(p)
+            if not p_xy: continue
+
+            # 应用增量 (Grade)
+            if p_id in vertex_delta:
+                dv = vertex_delta.get(p_id, None)
+            elif p_id in ctrl_delta:
+                dv = ctrl_delta.get(p_id, None)
+            else:
+                # 尝试通过位置查找增量
                 dv = all_delta_by_pos.get((p_xy[0], p_xy[1]), (0.0, 0.0))
-            p_xy = _add(p_xy, dv)
-        elif p_id in ctrl_delta:
-            dv = ctrl_delta.get(p_id, None)
-            if dv is None:
-                # 尝试从 all_delta_by_pos 读取
-                dv = all_delta_by_pos.get((p_xy[0], p_xy[1]), (0.0, 0.0))
-            p_xy = _add(p_xy, dv)
-        if p_xy: pts.append(p_xy)
-    if pB: pts.append(pB)
-    return pts
+            if dv:
+                p_xy = _add(p_xy, dv)
+            control_points_xy.append(p_xy)
+
+    # 3. 组装并生成最终的点序列
+    # 最终序列 = [起点] + [曲线中间采样点...] + [终点]
+    final_pts = []
+    
+    if pA: final_pts.append(pA)
+    
+    if not control_points_xy:
+        # 直线：没有中间控制点
+        pass 
+    else:
+        # 贝塞尔曲线处理：将 起点 + 控制点 + 终点 传入进行采样
+        # 注意：必须有起点和终点才能计算曲线
+        if pA and pB:
+            all_bezier_def = [pA] + control_points_xy + [pB]
+            # 采样生成中间点 (segments=20 意味着生成约20个点，足够平滑)
+            sampled_mid_points = _sample_bezier(all_bezier_def, segments=20)
+            final_pts.extend(sampled_mid_points)
+        else:
+            # 异常情况（缺端点），回退到直接连接控制点
+            final_pts.extend(control_points_xy)
+
+    if pB: final_pts.append(pB)
+    
+    return final_pts
 
 def _valid_loop(L: Loop) -> bool:
     return len(L) >= 4 and abs(_poly_area(L)) > 1e-9
@@ -203,7 +285,6 @@ def assemble_seqedge_loop_grade(seqedge_obj: Dict[str, Any],
         return []
     
     vertex_list = []
-
     def edge_poly(eid: int):
         eobj = by_id.get(int(eid), {}) or {}
         a = int(eobj.get("verticeA", -1)); b = int(eobj.get("verticeB", -1))
@@ -223,7 +304,7 @@ def assemble_seqedge_loop_grade(seqedge_obj: Dict[str, Any],
             continue
         # 去掉重复的连接点
         loop_pts.extend(poly)
-    return loop_pts,vertex_list
+    return loop_pts, vertex_list, eids
 
 def pattern_to_loops_grade(pattern_obj: Dict[str, Any],
                            by_id: Dict[int, Dict[str, Any]],
@@ -232,18 +313,20 @@ def pattern_to_loops_grade(pattern_obj: Dict[str, Any],
                            all_delta_by_pos: Dict[XY, XY]) -> List[Loop]:
     loops: List[Loop] = []
     vertex_list_all = []
+    seq_edge = {}
     if not isinstance(pattern_obj, dict):
         return loops
     for sid in (pattern_obj.get("sequentialEdges") or []):
         so = by_id.get(int(sid))
         if int(so.get("circleType")) != 0:
             continue
-        L, vertex_list = assemble_seqedge_loop_grade(so, by_id, vertex_delta, ctrl_delta, all_delta_by_pos)
+        L, vertex_list, eids = assemble_seqedge_loop_grade(so, by_id, vertex_delta, ctrl_delta, all_delta_by_pos)
         vertex_list_all.append(vertex_list)
+        seq_edge.update({sid: eids})
         if len(L) < 4:
             continue
         loops.append(L)
-    return loops, vertex_list_all
+    return loops, vertex_list_all, seq_edge
 
 # ---- seam meta ----
 def edge_seam_width(edge_obj: dict, by_id: dict) -> float:
@@ -315,7 +398,8 @@ def build_loops_for_size(by_id, size_obj, piece_ids=None, seam_join: str = "roun
         piece = by_id.get(int(pid)) or {}
         patt  = by_id.get(int(piece.get("pattern", -1))) or {}
 
-        cut_loops, vertex_list_all = pattern_to_loops_grade(patt, by_id, vmap, cmap, all_delta_by_pos)
+        cut_loops, vertex_list_all, seq_edge = pattern_to_loops_grade(patt, by_id, vmap, cmap, all_delta_by_pos)
+        
         
         # print (f"{vertex_list_all}")
         # print ("  Cut loops:", len(cut_loops))
@@ -324,7 +408,8 @@ def build_loops_for_size(by_id, size_obj, piece_ids=None, seam_join: str = "roun
         # print (vertex_list_all)
         if not cut_loops:
             continue
-        first_cut_loops = cut_loops[:-1]
+        cut_loops = cut_loops[:-1]
+        seq_edge = {k:v for k,v in seq_edge.items() if v in cut_loops}
         
         # 从数据里读“主流缝份宽”（中位数），不再猜测
         w = piece_uniform_seam_width(piece, by_id)
@@ -341,26 +426,23 @@ def build_loops_for_size(by_id, size_obj, piece_ids=None, seam_join: str = "roun
         # 只要外侧缝份环带（可选）
         seam_band = difference(seam_outer, cut_loops)        
         out[int(pid)] = {
-            "cut": first_cut_loops,
+            "cut": cut_loops,
             "with_seam": seam_outer,
             "seam_band": seam_band,
-            "seamline_in": seamline_in
+            "seamline_in": seamline_in,
+            "seq_edge": seq_edge
         }
         seamline_in  = _clean_loops(seamline_in)
         
 
         # -- 清洗裁线 --
         cut_loops = _clean_loops(cut_loops)
+        seq_edge = {k:v for k,v in seq_edge.items() if v in cut_loops}
         if not cut_loops:
             continue
-
-
-
     return out
 
-
 # -------------------- 简单排版 & 渲染 --------------------
-
 def bbox_of_loops(loops: List[Loop]) -> Tuple[float, float, float, float]:
     xs, ys = [], []
     for L in loops:
