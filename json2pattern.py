@@ -178,8 +178,6 @@ def build_layout_affine(grade_group):
         layout_affine[int(pid)] = mat4_to_affine2d(m16)
     return layout_affine
 
-
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("project_json")
@@ -236,6 +234,9 @@ def main():
         seamline_in_by_piece = {pid: v["seamline_in"] for pid, v in res.items()}
         with_seam_by_piece   = {pid: v["with_seam"]   for pid, v in res.items()}
         seam_band_by_piece   = {pid: v["seam_band"]   for pid, v in res.items() if v["seam_band"]}
+        seq_edge = {pid: v["seq_edge"] for pid, v in res.items()}
+        
+        
 
         # 调试：粗裁线 + 细缝线（虚线）
         out_dbg = os.path.join(args.outdir, f"{current_name}_{size_name}_debug_cut_vs_seam.svg")
