@@ -9,85 +9,52 @@
 依赖 seam_offset.py（优先使用 pyclipper），无法使用时仍能输出裁线版。
 """
 
-from typing import Dict, Any, List, Tuple, Optional
-import os, math
 
+import os
+import math
+import pyclipper as pc
+from typing import Dict, Any, List, Tuple, Optional
 from seam_offset import offset_outset, union, difference   # NEW
+from collections import defaultdict
 
 XY   = Tuple[float, float]
 Loop = List[XY]
-
-# --- 新增: seam 帮助函数（放在 size_to_svg_sym.py 里现有 import 之后） ---
-import pyclipper as pc
-from collections import defaultdict
-
 SCALE = 1000.0        # 原100 → 1000，整数化更细
 ARC_TOL = 0.10        # 新增：圆角近似精度
-
-
-# ===== 新增：读取顶点 corner type（0~4） =====
-def vertex_corner_mode(vid: int, by_id: dict) -> int:
-    v = by_id.get(int(vid), {}) or {}
-    vp = by_id.get(int(v.get("vertexProperty") or 0), {}) or {}
-    # 0:Default, 1:Arc, 2:Notch, 3:Bevel, 4:Fold
-    return int(vp.get("seamAllowanceVertexType", 0) or 0)
-
-def vertex_corner_dist(vid: int, by_id: dict) -> float:
-    v = by_id.get(int(vid), {}) or {}
-    vp = by_id.get(int(v.get("vertexProperty") or 0), {}) or {}
-    return float(vp.get("seamCornerDistance", 0.0) or 0.0)
-
-
-# ===== 新增：几何小工具（方向、三角楔形、多边形布尔） =====
-import math
-
-# -------------------- 贝塞尔曲线数学公式 --------------------
-def _bezier_quadratic(p0: XY, p1: XY, p2: XY, t: float) -> XY:
-    """二次贝塞尔 B(t) = (1-t)^2 * P0 + 2(1-t)t * P1 + t^2 * P2"""
-    u = 1 - t
-    tt = t * t
-    uu = u * u
-    x = uu * p0[0] + 2 * u * t * p1[0] + tt * p2[0]
-    y = uu * p0[1] + 2 * u * t * p1[1] + tt * p2[1]
-    return (x, y)
-
-def _bezier_cubic(p0: XY, p1: XY, p2: XY, p3: XY, t: float) -> XY:
-    """三次贝塞尔 B(t) = (1-t)^3 P0 + 3(1-t)^2 t P1 + 3(1-t)t^2 P2 + t^3 P3"""
-    u = 1 - t
-    uu = u * u
-    uuu = uu * u
-    tt = t * t
-    ttt = tt * t
+# -------------------- 贝塞尔曲线数学工具 --------------------
+def _de_casteljau(points: List[XY], t: float) -> XY:
+    """
+    使用 De Casteljau 算法计算任意阶贝塞尔曲线在 t 时刻的坐标。
+    递归方式，支持任意数量的控制点（高阶）。
+    """
+    if len(points) == 1:
+        return points[0]
     
-    x = uuu * p0[0] + 3 * uu * t * p1[0] + 3 * u * tt * p2[0] + ttt * p3[0]
-    y = uuu * p0[1] + 3 * uu * t * p1[1] + 3 * u * tt * p2[1] + ttt * p3[1]
-    return (x, y)
+    new_points = []
+    for i in range(len(points) - 1):
+        x = (1 - t) * points[i][0] + t * points[i+1][0]
+        y = (1 - t) * points[i][1] + t * points[i+1][1]
+        new_points.append((x, y))
+        
+    return _de_casteljau(new_points, t)
 
-def _sample_bezier(points: List[XY], segments: int = 20) -> List[XY]:
-    """将控制点列表离散化为曲线点序列"""
-    if len(points) < 3:
-        return points # 直线或点，无需采样
-    
+def _sample_bezier_curve(control_points: List[XY], segments: int = 20) -> List[XY]:
+    """
+    输入：[起点, 控制点1, 控制点2, ..., 终点]
+    输出：采样后的曲线点列表（不含起点和终点，避免拼接时重复）
+    segments: 采样段数，越高越平滑
+    """
+    if len(control_points) < 3:
+        return [] # 直线无需采样中间点
+
     curve_pts = []
-    # 二次贝塞尔 (起点, 控制点, 终点)
-    if len(points) == 3:
-        p0, p1, p2 = points
-        # 从 t=0 到 t=1 采样，这里取中间点，起点终点由外部逻辑处理防止重复
-        for i in range(1, segments): 
-            t = i / float(segments)
-            curve_pts.append(_bezier_quadratic(p0, p1, p2, t))
-            
-    # 三次贝塞尔 (起点, 控制点1, 控制点2, 终点)
-    elif len(points) == 4:
-        p0, p1, p2, p3 = points
-        for i in range(1, segments):
-            t = i / float(segments)
-            curve_pts.append(_bezier_cubic(p0, p1, p2, p3, t))
-            
-    # 其他情况暂按原样返回（或者处理更高阶）
-    else:
-        return points[1:-1] 
-
+    # 从 t > 0 到 t < 1 进行采样 (不包含 0 和 1)
+    # t=0 是起点，t=1 是终点，这两点由外部逻辑添加
+    for i in range(1, segments):
+        t = i / float(segments)
+        pt = _de_casteljau(control_points, t)
+        curve_pts.append(pt)
+    
     return curve_pts
 
 def _poly_area(pts):
@@ -182,6 +149,7 @@ def get_ctrl_xy(cid: int, by_id: Dict[int, Dict[str, Any]], ctrl_delta: Dict[int
 
 # -------------------- 采样边（保持和原版一致） --------------------
 # -------------------- 采样边（修改版：支持贝塞尔曲线） --------------------
+# -------------------- 采样边（升级版：支持任意阶贝塞尔曲线） --------------------
 def sample_edge_points_grade(edge_obj: Dict[str, Any],
                              by_id: Dict[int, Dict[str, Any]],
                              vertex_delta: Dict[int, XY],
@@ -190,67 +158,87 @@ def sample_edge_points_grade(edge_obj: Dict[str, Any],
     if not isinstance(edge_obj, dict):
         return []
 
-    # 1. 获取起点和终点 (应用 Grade 增量)
+    # 1. 获取起点 A
     pA = get_vertex_xy(int(edge_obj.get("verticeA", -1)), by_id, vertex_delta, all_delta_by_pos)
+    # 2. 获取终点 B
     pB = get_vertex_xy(int(edge_obj.get("verticeB", -1)), by_id, vertex_delta, all_delta_by_pos)
 
-    # 2. 收集所有控制点 (中间点)
+    # 3. 收集所有中间控制点（应用放码增量）
     curve = edge_obj.get("curve") or {}
-    cps = curve.get("controlPoints")
-    cps_id = edge_obj.get("curveControlPts")
+    cps = curve.get("controlPoints")      # 坐标列表
+    cps_id = edge_obj.get("curveControlPts") # ID列表
     
-    control_points_xy = [] # 仅存储中间的控制点坐标
-    
+    mid_ctrl_points = [] # 存储纯坐标 [(x,y), ...]
+
     if cps_id:
+        # Style3D/CLO 数据中，controlPoints 通常包含了所有点，或者与 curveControlPts 索引对应
+        # 这里我们严谨地通过 ID 查找对应的原始坐标，并加上增量
         for i in range(len(cps_id)):
-            p_id = cps_id[i]
-            # Style3D 的 controlPoints 列表通常索引从 1 开始或是列表
-            # 无论如何，我们要找到对应的基础坐标
-            # 注意：cps 可能是 list 也可能是 dict，视解析结果而定
-            # 这里沿用你之前的逻辑尝试获取 p
-            try:
-                p = cps[i + 1] if isinstance(cps, list) else cps.get(str(i+1)) # 容错
-            except:
-                p = None
+            c_id = cps_id[i]
             
-            p_xy = _to_xy(p)
-            if not p_xy: continue
+            # 尝试获取该控制点的基础坐标
+            # 注意：cps 结构可能是 list 也可能是 dict，视解析器而定
+            # 如果 cps 是 list，通常第0个是起点(或无效)，第1个开始是控制点，具体视数据版本而定
+            # 最稳妥的方式是：如果有 ID，尝试去 ctrl_delta 查；如果没有，尝试从 geometry 读
+            
+            # 尝试从 cps 列表读取原始坐标作为 Base
+            raw_pos = None
+            if isinstance(cps, list) and i+1 < len(cps): 
+                 # 许多格式中 cps[0] 是起点，cps[i+1] 是第i个控制点
+                 raw_pos = cps[i+1]
+            elif isinstance(cps, list) and i < len(cps):
+                 raw_pos = cps[i]
+            
+            p_xy = _to_xy(raw_pos)
+            
+            # 如果找不到原始坐标，甚至可以尝试去 by_id 找 (虽然控制点通常不在 by_id 顶级索引中)
+            if not p_xy:
+                # 最后的兜底：如果无法定位基础位置，跳过该点（防止报错）
+                continue
 
-            # 应用增量 (Grade)
-            if p_id in vertex_delta:
-                dv = vertex_delta.get(p_id, None)
-            elif p_id in ctrl_delta:
-                dv = ctrl_delta.get(p_id, None)
+            # 计算增量 (Grade Delta)
+            dv = (0.0, 0.0)
+            if c_id in ctrl_delta:
+                dv = ctrl_delta[c_id]
+            elif c_id in vertex_delta:
+                dv = vertex_delta[c_id]
             else:
-                # 尝试通过位置查找增量
+                # 尝试空间位置匹配
                 dv = all_delta_by_pos.get((p_xy[0], p_xy[1]), (0.0, 0.0))
-            if dv:
-                p_xy = _add(p_xy, dv)
-            control_points_xy.append(p_xy)
+            
+            # 叠加增量
+            final_xy = _add(p_xy, dv)
+            mid_ctrl_points.append(final_xy)
 
-    # 3. 组装并生成最终的点序列
-    # 最终序列 = [起点] + [曲线中间采样点...] + [终点]
+    # 4. 构建最终点序列
     final_pts = []
     
-    if pA: final_pts.append(pA)
+    # 加入起点
+    if pA: 
+        final_pts.append(pA)
     
-    if not control_points_xy:
-        # 直线：没有中间控制点
-        pass 
+    # 处理中间部分
+    if not mid_ctrl_points:
+        # 直线：没有中间控制点，直接连过去
+        pass
     else:
-        # 贝塞尔曲线处理：将 起点 + 控制点 + 终点 传入进行采样
-        # 注意：必须有起点和终点才能计算曲线
+        # 曲线：必须有起点和终点才能生成
         if pA and pB:
-            all_bezier_def = [pA] + control_points_xy + [pB]
-            # 采样生成中间点 (segments=20 意味着生成约20个点，足够平滑)
-            sampled_mid_points = _sample_bezier(all_bezier_def, segments=20)
-            final_pts.extend(sampled_mid_points)
+            # 组合所有点：[起点, 控制点1, 控制点2, ..., 终点]
+            all_bezier_pts = [pA] + mid_ctrl_points + [pB]
+            
+            # 进行采样 (segments=20 足够平滑，如需更高精度可调大)
+            curve_sampled = _sample_bezier_curve(all_bezier_pts, segments=20)
+            
+            final_pts.extend(curve_sampled)
         else:
-            # 异常情况（缺端点），回退到直接连接控制点
-            final_pts.extend(control_points_xy)
+            # 异常情况：有控制点但缺端点，降级为直接连接控制点（为了画出来debug）
+            final_pts.extend(mid_ctrl_points)
 
-    if pB: final_pts.append(pB)
-    
+    # 加入终点
+    if pB: 
+        final_pts.append(pB)
+
     return final_pts
 
 def _valid_loop(L: Loop) -> bool:
@@ -342,17 +330,6 @@ def edge_seam_width(edge_obj: dict, by_id: dict) -> float:
     w = float(ep.get("seamAllowanceWidth", 0.0) or 0.0)
     # 也可考虑 ep.get("extraWidth") 等
     return max(0.0, w)
-
-def vertex_corner_dist(vtx_id: int, by_id: dict) -> float:
-    """读取顶点的‘缝角倒角距离’；没有就0"""
-    v = by_id.get(int(vtx_id), {}) or {}
-    vp_id = v.get("vertexProperty")
-    if not vp_id: 
-        return 0.0
-    vp = by_id.get(int(vp_id), {}) or {}
-    # Style3D 里常见字段名
-    return float(vp.get("seamCornerDistance", 0.0) or 0.0)
-
 
 def piece_uniform_seam_width(piece_obj: dict, by_id: dict) -> float:
     """遍历该片的所有连续边→边→EdgeProperty，取开启缝份的宽度中位数"""
