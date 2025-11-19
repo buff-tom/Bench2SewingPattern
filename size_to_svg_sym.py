@@ -377,12 +377,6 @@ def build_loops_for_size(by_id, size_obj, piece_ids=None, seam_join: str = "roun
 
         cut_loops, vertex_list_all, seq_edge = pattern_to_loops_grade(patt, by_id, vmap, cmap, all_delta_by_pos)
         
-        
-        # print (f"{vertex_list_all}")
-        # print ("  Cut loops:", len(cut_loops))
-        # print (cut_loops[0])
-        # print (cut_loops[1])
-        # print (vertex_list_all)
         if not cut_loops:
             continue
         cut_loops = cut_loops[:-1]
@@ -392,26 +386,21 @@ def build_loops_for_size(by_id, size_obj, piece_ids=None, seam_join: str = "roun
         w = piece_uniform_seam_width(piece, by_id)
 
         if w <= 1e-6:
-            out[int(pid)] = {"cut": cut_loops, "with_seam": cut_loops[:], "seam_band": [], "seamline_in": []}
+            out[int(pid)] = {"cut": cut_loops, "with_seam": cut_loops[:], "seamline_in": []}
             continue
         # 关键改动：对“闭合环”一次性 offset（round 避免尖刺；miter_limit 小一点）
         # _render_svg_any(first_cut_loops, out_path=f"out_temp/{size_obj.get('_name', '')}_{pid}_cut.svg")
         seam_outer   = offset_outset(cut_loops, dist=+w, join="round", miter_limit=1.2)
-        seam_outer = _clean_loops(seam_outer)  # 清洗后赋值
         seamline_in  = offset_outset(cut_loops, dist=-w, join="round", miter_limit=1.2)
-        seamline_in = _clean_loops(seamline_in)  # 清洗后赋值
-        # 只要外侧缝份环带（可选）
-        seam_band = difference(seam_outer, cut_loops)        
+        # 只要外侧缝份环带（可选）      
         out[int(pid)] = {
             "cut": cut_loops,
             "with_seam": seam_outer,
-            "seam_band": seam_band,
             "seamline_in": seamline_in,
             "seq_edge": seq_edge
         }
         seamline_in  = _clean_loops(seamline_in)
-        
-
+        seam_outer = _clean_loops(seam_outer)
         # -- 清洗裁线 --
         cut_loops = _clean_loops(cut_loops)
         seq_edge = {k:v for k,v in seq_edge.items() if v in cut_loops}

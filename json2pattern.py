@@ -226,23 +226,22 @@ def main():
         if not piece_ids_this:
             piece_ids_this = cloth_piece_ids_global
 
-        piece_ids_this = [2728]
+        # piece_ids_this = [2728]
         # 以“grade 节点”驱动生成当前尺码的裁线 / 缝线
         res = build_loops_for_size(by_id, grade_obj, piece_ids_this)
 
         cut_by_piece         = {pid: v["cut"]         for pid, v in res.items()}
         seamline_in_by_piece = {pid: v["seamline_in"] for pid, v in res.items()}
         with_seam_by_piece   = {pid: v["with_seam"]   for pid, v in res.items()}
-        seam_band_by_piece   = {pid: v["seam_band"]   for pid, v in res.items() if v["seam_band"]}
         seq_edge = {pid: v["seq_edge"] for pid, v in res.items()}
         
         
 
         # 调试：粗裁线 + 细缝线（虚线）
         out_dbg = os.path.join(args.outdir, f"{current_name}_{size_name}_debug_cut_vs_seam.svg")
-        render_cut_and_seamline(cut_by_piece, seamline_in_by_piece, out_dbg)
+        render_cut_and_seamline(cut_by_piece, cut_by_piece, out_dbg)
         from size_to_svg_sym import render_cut_innerfill
-        render_cut_innerfill(cut_by_piece, seamline_in_by_piece, out_dbg, color="#0A2A6B")
+        # render_cut_innerfill(cut_by_piece, seamline_in_by_piece, out_dbg, color="#0A2A6B")
 
         # 4) 输出
         if args.variant in ("cut","both","all"):
@@ -253,10 +252,6 @@ def main():
         if args.variant in ("with_seam","both","all"):
             out_ws = os.path.join(args.outdir, f"{current_name}_{size_name}_withSeam.svg")
             render_combined_variant(with_seam_by_piece, out_ws)
-
-        if args.variant == "all" and seam_band_by_piece:
-            out_sb = os.path.join(args.outdir, f"{current_name}_{size_name}_seamBand.svg")
-            render_combined_variant(seam_band_by_piece, out_sb)
 
         print(f"[OK] grade {size_name} ({gid}) done.")
 
