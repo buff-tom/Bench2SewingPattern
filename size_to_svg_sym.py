@@ -63,19 +63,8 @@ def _to_xy(v: Any) -> Optional[XY]:
             except: return None
     return None
 
-
 def _add(a: XY, b: XY) -> XY:
     return (a[0]+b[0], a[1]+b[1])
-
-def _dist2(a: XY, b: XY) -> float:
-    return (a[0]-b[0])**2 + (a[1]-b[1])**2
-
-def _dedup_consecutive(pts: Loop, eps2=1e-12) -> Loop:
-    out: Loop = []
-    for p in pts:
-        if not out or _dist2(out[-1], p) > eps2:
-            out.append(p)
-    return out
 
 # -------------------- grade 映射 --------------------
 def build_grade_maps(by_id: Dict[int, Dict[str, Any]], grade_obj: Dict[str, Any]):
@@ -154,16 +143,6 @@ def sample_edge_points_grade(edge_obj: Dict[str, Any],
     pA = get_vertex_xy(int(edge_obj.get("verticeA", -1)), by_id, vertex_delta, all_delta_by_pos)
     pB = get_vertex_xy(int(edge_obj.get("verticeB", -1)), by_id, vertex_delta, all_delta_by_pos)
 
-    # cc_ids = edge_obj.get("curveControlPts")
-    # if isinstance(cc_ids, list) and len(cc_ids) >= 1:
-    #     pts: Loop = []
-    #     if pA: pts.append(pA)
-    #     for cid in cc_ids:
-    #         cxy = get_ctrl_xy(int(cid), by_id, ctrl_delta, vertex_delta, all_delta_by_pos)
-    #         if cxy: pts.append(cxy)
-    #     if pB: pts.append(pB)
-    #     if len(pts) >= 2:
-    #         return _dedup_consecutive(pts)
     curve = edge_obj.get("curve") or {}
     cps = curve.get("controlPoints")
     cps_id = edge_obj.get("curveControlPts")

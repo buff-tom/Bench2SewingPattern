@@ -228,8 +228,8 @@ def main():
         if not piece_ids_this:
             piece_ids_this = cloth_piece_ids_global
 
-        # piece_ids_this = [6411]
-        # 1) 以“grade 节点”驱动生成当前尺码的裁线 / 缝线
+        piece_ids_this = [2728]
+        # 以“grade 节点”驱动生成当前尺码的裁线 / 缝线
         res = build_loops_for_size(by_id, grade_obj, piece_ids_this)
 
         cut_by_piece         = {pid: v["cut"]         for pid, v in res.items()}
@@ -237,13 +237,7 @@ def main():
         with_seam_by_piece   = {pid: v["with_seam"]   for pid, v in res.items()}
         seam_band_by_piece   = {pid: v["seam_band"]   for pid, v in res.items() if v["seam_band"]}
 
-        # 2) 应用 GradeGroup 布置矩阵（含镜像纠正/外环 CCW）
-        # cut_by_piece         = apply_affine_to_loops(cut_by_piece,         layout_affine, fix_winding=True)
-        # seamline_in_by_piece = apply_affine_to_loops(seamline_in_by_piece, layout_affine, fix_winding=True)
-        # with_seam_by_piece   = apply_affine_to_loops(with_seam_by_piece,   layout_affine, fix_winding=True)
-        # seam_band_by_piece   = apply_affine_to_loops(seam_band_by_piece,   layout_affine, fix_winding=True)
-
-        # 3) 调试：粗裁线 + 细缝线（虚线）
+        # 调试：粗裁线 + 细缝线（虚线）
         out_dbg = os.path.join(args.outdir, f"{current_name}_{size_name}_debug_cut_vs_seam.svg")
         render_cut_and_seamline(cut_by_piece, seamline_in_by_piece, out_dbg)
         from size_to_svg_sym import render_cut_innerfill
@@ -255,13 +249,13 @@ def main():
             from size_to_svg_sym import render_filled_cut
             render_filled_cut(cut_by_piece, out_cut, color="#0A2A6B")
 
-        # if args.variant in ("with_seam","both","all"):
-        #     out_ws = os.path.join(args.outdir, f"{current_name}_{size_name}_withSeam.svg")
-        #     render_combined_variant(with_seam_by_piece, out_ws)
+        if args.variant in ("with_seam","both","all"):
+            out_ws = os.path.join(args.outdir, f"{current_name}_{size_name}_withSeam.svg")
+            render_combined_variant(with_seam_by_piece, out_ws)
 
-        # if args.variant == "all" and seam_band_by_piece:
-        #     out_sb = os.path.join(args.outdir, f"{current_name}_{size_name}_seamBand.svg")
-        #     render_combined_variant(seam_band_by_piece, out_sb)
+        if args.variant == "all" and seam_band_by_piece:
+            out_sb = os.path.join(args.outdir, f"{current_name}_{size_name}_seamBand.svg")
+            render_combined_variant(seam_band_by_piece, out_sb)
 
         print(f"[OK] grade {size_name} ({gid}) done.")
 
