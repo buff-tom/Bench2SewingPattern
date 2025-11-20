@@ -123,13 +123,6 @@ def find_grade_group(all_classes):
     groups = all_classes.get(4153459189, [])  # GradeGroup
     return groups[0] if groups else None
 
-def mat4_to_affine2d(m16):
-    # 4x4（行主序） → 2D 仿射 (a11,a12,a21,a22,tx,ty)
-    a11,a12 = float(m16[0]),  float(m16[1])
-    a21,a22 = float(m16[4]),  float(m16[5])
-    tx, ty  = float(m16[12]), float(m16[13])
-    return (a11,a12,a21,a22,tx,ty)
-
 def _poly_area(L):
     s=0.0
     for (x1,y1),(x2,y2) in zip(L, L[1:]+L[:1]):
@@ -172,12 +165,6 @@ def piece_ids_from_gradegroup(grade_group, fallback_piece_ids):
     ids = [int(pid) for pid,_ in (grade_group.get("clothPieceFabricBaseMatrix") or [])]
     return ids if ids else [int(x) for x in (fallback_piece_ids or [])]
 
-def build_layout_affine(grade_group):
-    layout_affine = {}
-    for pid, m16 in (grade_group.get("clothPieceFabricBaseMatrix") or []):
-        layout_affine[int(pid)] = mat4_to_affine2d(m16)
-    return layout_affine
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("project_json")
@@ -201,7 +188,6 @@ def main():
 
     # ---- 基于 GradeGroup 的新流程 ----
     grade_ids = list(grade_group.get("grades") or [])
-    layout_affine = build_layout_affine(grade_group)
     base_grade_id = grade_group.get("baseGrade")
     base_grade = by_id.get(int(base_grade_id)) if base_grade_id is not None else None
     base_grade_delta = base_grade.get("deltas") if base_grade else None
