@@ -16,6 +16,7 @@ import os, json, argparse
 from collections import defaultdict
 
 from size_to_svg_sym import build_loops_for_size, render_combined_variant, render_cut_and_seamline
+from json2sewing import build_sewing_topology
 
 def load_json(path):
     try:
@@ -220,13 +221,12 @@ def main():
         seamline_in_by_piece = {pid: v["seamline_in"] for pid, v in res.items()}
         with_seam_by_piece   = {pid: v["with_seam"]   for pid, v in res.items()}
         seq_edge = {pid: v["seq_edge"] for pid, v in res.items()}
+        sewing_pair = build_sewing_topology(G, by_id, seq_edge, piece_ids_this)
         
-        
-
         # 调试：粗裁线 + 细缝线（虚线）
         out_dbg = os.path.join(args.outdir, f"{current_name}_{size_name}_debug_cut_vs_seam.svg")
         render_cut_and_seamline(cut_by_piece, cut_by_piece, out_dbg)
-        from size_to_svg_sym import render_cut_innerfill
+        # from size_to_svg_sym import render_cut_innerfill
         # render_cut_innerfill(cut_by_piece, seamline_in_by_piece, out_dbg, color="#0A2A6B")
 
         # 4) 输出
