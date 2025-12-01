@@ -169,9 +169,7 @@ def main():
         safe_size_name = "".join([c for c in size_name if c.isalnum() or c in ('-','_')])
 
         # 确定当前尺码有效的 Piece ID
-        piece_ids_this = [int(p[0]) for p in (grade_obj.get("clothPieceInfoMap") or [])]
-        if not piece_ids_this:
-            piece_ids_this = cloth_piece_ids_global
+        piece_ids_this = cloth_piece_ids_global
 
         # === 核心调用：提取裁片 ===
         # 此时返回的 dict 结构: { pid: { "cut": loops, "with_seam": loops, ... } }

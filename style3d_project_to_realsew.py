@@ -278,14 +278,8 @@ def build_realsew_spec_for_grade(
 
     fallback_piece_ids = garment_obj.get("clothPieces", [])
     grade_group = find_grade_group(all_classes)
-    if grade_group:
-        cloth_piece_ids_global = piece_ids_from_gradegroup(grade_group, fallback_piece_ids)
-    else:
-        cloth_piece_ids_global = [int(x) for x in fallback_piece_ids]
-
-    piece_ids_this = [int(p[0]) for p in (grade_obj.get("clothPieceInfoMap") or []) if isinstance(p, list) and p]
-    if not piece_ids_this:
-        piece_ids_this = cloth_piece_ids_global
+    cloth_piece_ids_global = [int(x) for x in fallback_piece_ids]
+    piece_ids_this = cloth_piece_ids_global
 
     # 包含对称片
     piece_ids_this = expand_with_symmetry(by_id, piece_ids_this)
@@ -339,7 +333,7 @@ def export_realsew_dataset(project_json: str, outdir: str):
         raise RuntimeError("找不到 GradeGroup (class 4153459189)")
 
     grade_ids = list(grade_group.get("grades") or [])
-
+    pieces_ids = garment_obj.get("clothPieces", [])
     print(f"Processing project: {project_json} with {len(grade_ids)} sizes...")
 
     for gid in grade_ids:
