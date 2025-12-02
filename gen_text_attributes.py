@@ -9,7 +9,7 @@ from google.genai import types
 from google.api_core.exceptions import GoogleAPIError, NotFound, PermissionDenied
 
 # ================= 2. 配置区域（修改这里！）=================
-API_KEY = "AIzaSyDmVIWSlrdfMQUbFuNyLkDrk5evKLBq4-k"  # 替换为真实Key
+API_KEY = "*"  # 替换为真实Key
 TARGET_FOLDER = "/home/user/buff-tomma/Pattern_Making/male_garment/male_asia_front_and_back_garment_with_model"
 
 # ================= 3. 初始化Gemini Client =================
@@ -123,11 +123,6 @@ def analyze_model_image(image_path, category_name, size, specs, gender, region, 
             response = client.models.generate_content(
                 model="gemini-2.5-flash",
                 contents=contents,
-                generation_config={
-                    "response_mime_type": "application/json",
-                    "temperature": 0.2,
-                    "timeout": 30,
-                }
             )
             
             response.resolve()
