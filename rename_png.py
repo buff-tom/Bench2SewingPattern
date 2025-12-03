@@ -36,6 +36,7 @@ TARGET_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 FOLDER_SIZE_MAP = {
     "XXXL码": "XXXL",
     "XXL码": "XXL",
+    "XXS码": "XXS",
     "XL码": "XL",
     "XS码": "XS",
     "L码": "L",
@@ -47,6 +48,7 @@ FOLDER_SIZE_MAP = {
 SIZE_KEYWORDS = [
     ("XXXL", "XXXL"),
     ("XXL",  "XXL"),
+    ("XXS",  "XXS"),
     ("XL",   "XL"),
     ("XS",   "XS"),
     ("L",    "L"),
