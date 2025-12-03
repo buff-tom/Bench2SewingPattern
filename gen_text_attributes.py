@@ -86,7 +86,7 @@ def parse_gemini_json(raw_text: str):
     return json.loads(s)
 
 
-# ================= 5. 定义Schema（这里顺便加上 description 字段） =================
+# ================= 5. 定义Schema =================
 class SizeAwareDescription(typing_extensions.TypedDict, total=False):
     garment_category: str
     target_gender: str
@@ -98,6 +98,7 @@ class SizeAwareDescription(typing_extensions.TypedDict, total=False):
     prompt_for_generation: str
     # 组合后的描述：visual + fit，作为主描述给 benchmark 用
     description: str
+    original_file: list[str]
 
 
 # ================= 6. 核心函数 =================
@@ -116,7 +117,6 @@ def analyze_model_image(image_path, category_name, size, specs, gender, region, 
             f"Waist: {specs['waist']}cm, Hip: {specs['hip']}cm"
         )
 
-    # Prompt 保持原有结构（单独要 fit / visual / prompt 三段）
     prompt = f"""
 You are a Technical Fashion Designer analyzing a fit session.
 Your output MUST be a valid JSON string that strictly conforms to the following schema:
@@ -147,7 +147,6 @@ Task:
     for retry in range(max_retries):
         try:
             print(f"   -> Sending to Gemini 2.5 Flash... (Size: {size}, Retry: {retry+1})")
-            # 两张图：第一张通过 files.upload，第二张直接 bytes
             uploaded_file = client.files.upload(file=image_path[0])
             with open(image_path[1], "rb") as f:
                 img2_bytes = f.read()
@@ -170,7 +169,7 @@ Task:
             if not data.get("model_body_specs") and specs:
                 data["model_body_specs"] = specs
 
-            # ⭐ 新增：组合 description = visual + " Fit Analysis: " + fit
+            # 组合 description = visual + " Fit Analysis: " + fit
             visual = (data.get("visual_description") or "").strip()
             fit = (data.get("fit_analysis") or "").strip()
             if visual or fit:
@@ -181,13 +180,12 @@ Task:
                     parts.append(f"Fit Analysis: {fit}")
                 data["description"] = " ".join(parts)
 
-            # 清理上传的临时文件
             client.files.delete(name=uploaded_file.name)
             return data
 
         except PermissionDenied as e:
             print(f"   [Error] 权限拒绝/地区限制: {e}")
-            print("   建议：1. 检查API密钥有效性 2. 确认代理节点在Gemini支持地区（美/日/欧盟）")
+            print("   建议：1. 检查API密钥有效性 2. 确认代理节点在Gemini支持地区")
             break
 
         except NotFound as e:
@@ -214,7 +212,7 @@ Task:
 
 
 # ================= 7. 遍历处理+入口 =================
-def process_root_folder(root_path):
+def process_root_folder(root_path: str):
     root_name = os.path.basename(root_path).lower()
 
     if "female" in root_name:
@@ -233,19 +231,18 @@ def process_root_folder(root_path):
 
     print(f"🚀 Processing Root: {root_name} | Gender: {gender} | Region: {region}")
 
-    # 对每一个款式目录单独建一个 results，写到该目录下
+    # 按款式目录遍历
     for category_dir in os.listdir(root_path):
         cat_path = os.path.join(root_path, category_dir)
         if not os.path.isdir(cat_path):
             continue
-
-        results: dict[str, SizeAwareDescription] = {}
 
         for size_dir in os.listdir(cat_path):
             size_path = os.path.join(cat_path, size_dir)
             if not os.path.isdir(size_path):
                 continue
 
+            # 查找该 size 下的图片
             image_candidates = [
                 f
                 for f in os.listdir(size_path)
@@ -254,7 +251,7 @@ def process_root_folder(root_path):
             if len(image_candidates) < 2:
                 continue
 
-            image_candidates.sort()  # 保证顺序稳定
+            image_candidates.sort()
             target_image = [
                 os.path.join(size_path, image_candidates[0]),
                 os.path.join(size_path, image_candidates[1]),
@@ -272,22 +269,17 @@ def process_root_folder(root_path):
             )
 
             if data:
-                uid = f"{category_dir}_{size_dir}"
+                # original_file：使用与 JSON 同目录下的文件名
+                basenames = [os.path.basename(p) for p in target_image]
+                data["original_file"] = basenames
 
-                # ⭐ original_file 使用相对 root_path 的路径，方便打包数据集
-                rel_paths = [os.path.relpath(p, root_path) for p in target_image]
-                data["original_file"] = rel_paths
+                save_path = os.path.join(size_path, "description.json")
+                with open(save_path, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
 
-                results[uid] = data
+                print(f"   ✅ Saved description for {category_dir}/{size_dir} -> {save_path}")
 
             time.sleep(1)
-
-        # 每个款式目录一个 size_descriptions.json
-        if results:
-            save_path = os.path.join(cat_path, "size_descriptions.json")
-            with open(save_path, "w", encoding="utf-8") as f:
-                json.dump(results, f, ensure_ascii=False, indent=2)
-            print(f"   ✅ Saved descriptions for {category_dir} -> {save_path}")
 
 
 if __name__ == "__main__":
