@@ -9,8 +9,8 @@ from google.genai import types
 from google.api_core.exceptions import GoogleAPIError, NotFound, PermissionDenied
 
 # ================= 2. 配置区域（修改这里！）=================
-API_KEY = "YOUR_API_KEY_HERE"  # 记得替换为真实Key
-TARGET_FOLDER = "/home/user/buff-tomma/Pattern_Making/male_garment/male_asia_front_and_back_garment_with_model"
+API_KEY = os.getenv("GOOGLE_API_KEY")
+TARGET_FOLDER = "/home/user/buff-tomma/Bench2SewingPattern_DataSet/female/female_asia_model"
 
 # ================= 3. 初始化Gemini Client =================
 client = genai.Client(api_key=API_KEY)

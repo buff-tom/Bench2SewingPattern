@@ -25,7 +25,7 @@ def find_dirs(root_dir):
     
 
 def main():
-    root_dir = "/home/user/buff-tomma/Pattern_Making/female_garment/female_asia_front_and_back_garment_with_model"
+    root_dir = "/home/user/buff-tomma/Bench2SewingPattern_DataSet/female/female_eur_model"
     find_dirs(root_dir)
     
 if __name__ == "__main__":
