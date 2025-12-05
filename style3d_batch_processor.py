@@ -11,7 +11,10 @@ Style3D Benchmark 数据集构建工具 (Batch Processor)
    - Spec JSON: 包含拓扑图和几何数据。
    - SVG: 可视化矢量图（自动排版）。
 
-依赖: json2sewing.py, size_to_svg_sym.py
+额外约定：
+- 输出 spec / svg 直接存到「图片根目录/style_dir/size_dir」下，
+  与对应的 front/back PNG 放在同一个文件夹中。
+- 文件命名格式：{gender}_{region}_{styleID}_{size}_spec.json，spec 和 svg 文件放入相应的 `size_dir`。
 """
 
 import os
@@ -19,7 +22,10 @@ import json
 import math
 import argparse
 import traceback
+import csv
+import re
 from typing import Dict, Any, List, Tuple
+import logging
 
 # ========= 依赖检查与导入 =========
 try:
@@ -28,7 +34,7 @@ try:
         build_grade_maps,
         pattern_to_loops_grade,
         expand_with_symmetry,
-        render_cut_and_seamline, # 引用可视化渲染
+        render_cut_and_seamline,  # 引用可视化渲染
         pack_grid                # 引用排版算法
     )
 except ImportError as e:
@@ -119,7 +125,7 @@ def piece_ids_from_gradegroup(grade_group: Dict[str, Any], fallback_ids: List[in
     ids = [int(p[0]) for p in (grade_group.get("clothPieceFabricBaseMatrix") or [])]
     return ids if ids else [int(x) for x in (fallback_ids or [])]
 
-# ========= 核心构建逻辑 =========
+# ========= Spec 构建逻辑 =========
 
 def build_pieces_and_edge_lookup(
     by_id: Dict[int, Dict[str, Any]],
@@ -141,7 +147,7 @@ def build_pieces_and_edge_lookup(
 
         # 1. 提取原始几何 (Raw Geometry)
         raw_loops, _, seq_edge = pattern_to_loops_grade(patt, by_id, vmap, cmap, all_delta)
-        if not raw_loops: continue
+        if not raw_loops: continue 
         if len(raw_loops) > 1:
             raw_loops = raw_loops[:-1]
         # 2. 标准化 (Normalization)
@@ -217,21 +223,107 @@ def generate_visual_ground_truth(spec: Dict[str, Any], out_path_base: str):
     # 这会生成 _cut.svg (纯裁片) 和 _seam.svg (缝线)
     render_cut_and_seamline(cut_loops, {}, out_path_base)
 
+# ========= 与图片数据集的映射 =========
+
+def load_style_id_map(csv_path: str) -> Dict[str, str]:
+    """
+    读取 style_id_map.csv，返回:
+        {style_name: '00001', ...}
+    """
+    mapping: Dict[str, str] = {}
+    if not os.path.exists(csv_path):
+        print(f"⚠️ 找不到 style_id_map.csv: {csv_path}，将不使用 style_id。")
+        return mapping
+
+    with open(csv_path, "r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            sid = str(row["style_id"]).strip()
+            sname = row["style_name"].strip()
+            if not sname:
+                continue
+            if sid.isdigit():
+                sid_str = f"{int(sid):05d}"
+            else:
+                sid_str = sid
+            mapping[sname] = sid_str
+    print(f"✅ 已加载 style_id_map，共 {len(mapping)} 条")
+    return mapping
+
+
+def find_style_dir(image_root: str, project_root: str) -> Tuple[str, str]:
+    """
+    在图片根目录下找到对应款式目录名，并返回:
+        (style_dir_name, style_id_str)
+    规则：
+      
+      2) 否则尝试直接用 style_name 匹配目录
+      3) 最终找不到则返回 (style_name, '00000')
+    """
+    base_dir = os.path.basename(project_root)
+    image_dir_list = os.path.abspath(image_root)
+    if os.path.isdir(os.path.join(image_dir_list, base_dir)):
+        
+        return base_dir
+    
+    
+
+
+def infer_prefix_from_images(size_dir: str) -> Tuple[str, str, str, str] | None:
+    """
+    尝试从 size 目录中的任意一张图片文件推断：
+      gender, region, style_id_str, size_code
+    通过解析文件名:
+      gender_region_styleID_size_view.png
+    """
+    if not os.path.isdir(size_dir):
+        return None
+    for fname in os.listdir(size_dir):
+        lower = fname.lower()
+        if not (lower.endswith(".png") or lower.endswith(".jpg") or lower.endswith(".jpeg")):
+            continue
+        base = os.path.splitext(fname)[0]
+        parts = base.split("_")
+        if len(parts) < 4:
+            continue
+        gender, region, sid, size = parts[:4]
+        return gender, region, sid, size
+    return None
+
 # ========= 流程控制 =========
 
-def process_single_project(project_path: str, output_root: str):
+def process_single_project(
+    project_root: str,
+    project_path: str,
+    image_root: str,
+    default_gender: str,
+    default_region: str,
+):
     try:
         data = load_json(project_path)
         all_classes, by_id = build_indexes(data)
         
         garment = (all_classes.get(4038497362) or [{}])[0]
         grade_group = find_grade_group(all_classes)
-        if not grade_group: return
+        if not grade_group:
+            return
 
+        # Style3D 内部的款式名
         style_name = (data.get("_fileName", "proj").split("~")[0] or "proj").strip()
         if "." in style_name:
             style_name = "_".join(style_name.split("."))
-        print(f"处理款式: {style_name}")
+
+        print(f"\n====== 处理款式: {style_name}  ======")
+
+        # 在图片目录中找到对应的款式目录 + style_id
+        style_dir_name = find_style_dir(image_root, project_root)
+        # print(f"对应图片款式目录: {style_dir_name}")
+        # print(type(style_dir_name))
+        # exit(1)
+        style_dir_full = os.path.join(image_root, style_dir_name)
+        if not os.path.isdir(style_dir_full):
+            print(f"⚠️ 款式目录不存在：{style_dir_full}，跳过该款式。")
+            return
 
         # 确定需要处理的 Grade IDs
         grade_ids = list(grade_group.get("grades") or [])
@@ -239,17 +331,39 @@ def process_single_project(project_path: str, output_root: str):
         # 确定基础 Piece IDs
         fallback_ids = garment.get("clothPieces", [])
 
-        # 建立输出目录
-        style_out_dir = os.path.join(output_root, style_name)
-        os.makedirs(style_out_dir, exist_ok=True)
-
         for gid in grade_ids:
             grade_obj = by_id.get(int(gid))
-            if not grade_obj: continue
+            if not grade_obj:
+                continue
             
+            size_pattern = re.compile(r"(XXS|XS|S|M|L|XL|XXL|XXXL)")
             size_name = grade_obj.get("_name", f"G{gid}")
-            safe_size = "".join([c for c in size_name if c.isalnum() or c in ('-','_')])
-            
+            match = size_pattern.search(size_name)
+            if match:
+                size_name = match.group(1)  # 提取尺寸部分
+            else:   
+                size_name = size_name  # 保持原样
+            size_dir_name = size_name
+            size_dir_full = os.path.join(style_dir_full, size_dir_name)
+
+            if not os.path.isdir(size_dir_full):
+                print(f"⚠️ Size 目录不存在：{size_dir_full}，将自动创建。")
+                logging.info(f"创建 Size 目录：{size_dir_full}")
+                os.makedirs(size_dir_full, exist_ok=True)
+
+            # 从图片文件中推断命名前缀 {gender}_{region}_{styleID}_{size}
+            prefix_info = infer_prefix_from_images(size_dir_full)
+            if prefix_info is not None:
+                gender_code, region_code, sid_from_img, size_code = prefix_info
+            else:
+                gender_code = default_gender
+                region_code = default_region
+                sid_from_img = style_dir_name
+                size_code = size_name.upper()
+
+            base_prefix = f"{gender_code}_{region_code}_{sid_from_img}_{size_code}"
+            print(f"  -> 尺码: {size_name} | 输出前缀: {base_prefix}")
+
             # 1. 确定当前尺码的裁片 (含对称展开)
             pids = fallback_ids
 
@@ -263,7 +377,10 @@ def process_single_project(project_path: str, output_root: str):
             spec = {
                 "meta": {
                     "style": style_name,
+                    "style_dir": style_dir_name,
+                    "style_id": sid_from_img,
                     "grade": size_name,
+                    "size_code": size_code,
                     "unit": "mm",
                     "coordinate_system": "normalized_centered" # 显式标记坐标系
                 },
@@ -271,49 +388,80 @@ def process_single_project(project_path: str, output_root: str):
                 "seams": seams
             }
 
-            # 4. 保存 Spec JSON (GT for Graph/Seq Models)
-            base_name = f"{style_name}_{safe_size}"
-            json_path = os.path.join(style_out_dir, f"{base_name}_spec.json")
+            # 4. 保存 Spec JSON：放在图片的 size 目录下
+            json_path = os.path.join(size_dir_full, f"{base_prefix}_spec.json")
             with open(json_path, "w", encoding="utf-8") as f:
                 json.dump(spec, f, ensure_ascii=False, indent=2)
 
-            # 5. 保存 SVG (GT for Vision Models)
-            svg_base = os.path.join(style_out_dir, base_name)
+            # 5. 保存 SVG：同目录，同前缀
+            svg_base = os.path.join(size_dir_full, base_prefix)
             generate_visual_ground_truth(spec, svg_base)
             
-        print(f"  -> 完成: {style_out_dir}")
+            print(f"     ✅ Spec 写入: {json_path}")
+            print(f"     ✅ SVG 前缀: {svg_base}_*.svg")
 
     except Exception as e:
         print(f"❌ 处理失败 {project_path}: {str(e)}")
         traceback.print_exc()
 
-def process_root(input_dir: str, output_dir: str):
+
+def process_root(
+    input_dir: str,
+    image_root: str,
+    default_gender: str,
+    default_region: str,
+):
     count = 0
-    print(f"🚀 开始扫描目录: {input_dir}")
+    print(f"🚀 开始扫描 PRJ 目录: {input_dir}")
     for root, _, files in os.walk(input_dir):
         if "project.json" in files:
             full_path = os.path.join(root, "project.json")
-            
-            # 保持相对目录结构
-            rel_path = os.path.relpath(root, input_dir)
-            # 输出路径保留父级分类目录 (例如 Mens/Shirts/...)
-            category_path = os.path.dirname(rel_path) 
-            target_out = os.path.join(output_dir, category_path)
-            
-            process_single_project(full_path, target_out)
+            process_single_project(
+                root,
+                full_path,
+                image_root=image_root,
+                default_gender=default_gender,
+                default_region=default_region,
+            )
             count += 1
             
-    print(f"✅ 批处理结束。共处理 {count} 个项目。")
+    print(f"\n✅ 批处理结束。共处理 {count} 个项目。")
 
 # ========= 入口 =========
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description="Style3D Dataset Generator")
-    ap.add_argument("input_root", help="Raw Style3D data root directory")
-    ap.add_argument("-o", "--outdir", default="benchmark_dataset", help="Output directory")
+    ap = argparse.ArgumentParser(description="Style3D Dataset Generator (绑定图片目录)")
+    ap.add_argument("input_root", help="Raw Style3D data root directory (包含若干 project.json)")
+    ap.add_argument(
+        "-i", "--image-root",
+        required=True,
+        help="图片数据集根目录（包含 style 目录 / size 目录 / PNG 图片）"
+    )
+    ap.add_argument(
+        "--gender",
+        default="m",
+        help="默认 gender 编码，例如 m / f（当从图片中无法推断时使用）"
+    )
+    ap.add_argument(
+        "--region",
+        default="asia",
+        help="默认 region 编码，例如 asia / eur（当从图片中无法推断时使用）"
+    )
     args = ap.parse_args()
 
-    if os.path.exists(args.input_root):
-        process_root(args.input_root, args.outdir)
-    else:
-        print("❌ 输入目录不存在")
+    input_root = os.path.abspath(args.input_root)
+    image_root = os.path.abspath(args.image_root)
+
+    if not os.path.exists(input_root):
+        print("❌ 输入 PRJ 目录不存在")
+        exit(1)
+    if not os.path.exists(image_root):
+        print("❌ 图片根目录不存在")
+        exit(1)
+
+    process_root(
+        input_dir=input_root,
+        image_root=image_root,
+        default_gender=args.gender,
+        default_region=args.region,
+    )
